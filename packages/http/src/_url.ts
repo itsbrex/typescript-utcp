@@ -10,6 +10,24 @@
  * not also sent as query parameters. Throws when a parameter is missing.
  */
 export function buildUrlWithPathParams(urlTemplate: string, args: Record<string, any>): string {
+  // A template that IS a single placeholder — `{url}` / `${url}` — names the
+  // WHOLE URL, not a path segment of one. Percent-encoding it corrupts the
+  // scheme (`https://` becomes `https%3A%2F%2F`), after which no request can
+  // ever be made: the security validation downstream rejects the mangled
+  // string. Substitute raw instead — that same validation then sees a real
+  // URL and gets to police it properly. Templates that EMBED placeholders
+  // keep per-segment encoding below, which is what prevents path injection.
+  const wholeUrl = urlTemplate.match(/^\$?\{([^}]+)\}$/);
+  if (wholeUrl) {
+    const paramName = wholeUrl[1];
+    if (!Object.prototype.hasOwnProperty.call(args, paramName)) {
+      throw new Error(`Missing required path parameter: ${paramName}`);
+    }
+    const value = String(args[paramName]);
+    delete args[paramName];
+    return value;
+  }
+
   let url = urlTemplate;
   const placeholders = urlTemplate.match(/\$?\{([^}]+)\}/g) || [];
   const paramNames = Array.from(new Set(
