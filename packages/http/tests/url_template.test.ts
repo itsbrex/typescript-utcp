@@ -26,8 +26,16 @@ describe("buildUrlWithPathParams", () => {
   });
 
   test("a whole-URL template in the ${...} form substitutes raw too", () => {
-    const args: Record<string, any> = { target: "https://h/a b" };
-    expect(buildUrlWithPathParams("${target}", args)).toBe("https://h/a b");
+    const args: Record<string, any> = { url: "https://h/a b" };
+    expect(buildUrlWithPathParams("${url}", args)).toBe("https://h/a b");
+  });
+
+  test("the opt-in is the NAME `url`: other single-placeholder templates keep encoding", () => {
+    // A legacy template like `{endpoint}` must not silently become a
+    // caller-controlled destination on a library upgrade — raw substitution
+    // is only for the explicit `{url}` contract.
+    const args: Record<string, any> = { endpoint: "https://h/x" };
+    expect(buildUrlWithPathParams("{endpoint}", args)).toBe("https%3A%2F%2Fh%2Fx");
   });
 
   test("whole-URL substitution still requires the argument", () => {
