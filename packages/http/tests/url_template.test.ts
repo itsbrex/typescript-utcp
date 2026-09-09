@@ -1,6 +1,8 @@
 // packages/http/tests/url_template.test.ts
 import { test, expect, describe } from "bun:test";
 import { buildUrlWithPathParams } from "../src/_url";
+import { DefaultVariableSubstitutor } from "@utcp/sdk";
+import type { UtcpClientConfig } from "@utcp/sdk";
 
 describe("buildUrlWithPathParams", () => {
   test("encodes embedded path parameters", () => {
@@ -25,9 +27,12 @@ describe("buildUrlWithPathParams", () => {
     expect(args).toEqual({});
   });
 
-  test("a whole-URL template in the ${...} form substitutes raw too", () => {
-    const args: Record<string, any> = { url: "https://h/a b" };
-    expect(buildUrlWithPathParams("${url}", args)).toBe("https://h/a b");
+  test("the ${url} form is NOT the opt-in — that syntax belongs to the variable layer", () => {
+    // Through the default client, `${url}` never reaches this function: the
+    // variable substitutor consumes `${...}` first. If a protocol is driven
+    // directly, the generic (encoding) path applies — no raw substitution.
+    const args: Record<string, any> = { url: "https://h/x" };
+    expect(buildUrlWithPathParams("${url}", args)).toBe("https%3A%2F%2Fh%2Fx");
   });
 
   test("the opt-in is the NAME `url`: other single-placeholder templates keep encoding", () => {
@@ -54,5 +59,34 @@ describe("buildUrlWithPathParams", () => {
     expect(() => buildUrlWithPathParams("https://h/{a}/{b}", { a: "1" } as Record<string, any>)).toThrow(
       "Missing required path parameter: b",
     );
+  });
+});
+
+describe("layering with the client's variable substitutor", () => {
+  // The client substitutes `${...}` (config variables) into call templates
+  // BEFORE any protocol expands `{...}` (path params). These two tests pin
+  // that seam: the `{url}` opt-in survives the variable pass untouched and
+  // reaches buildUrlWithPathParams, while a `${url}` written in a template
+  // is consumed by the variable layer and never gets there.
+  const config = {
+    variables: { url: "https://from-config-vars.example" },
+    load_variables_from: null,
+  } as unknown as UtcpClientConfig;
+
+  test("`{url}` passes through variable substitution untouched", async () => {
+    const substitutor = new DefaultVariableSubstitutor();
+    const template = { url: "{url}", http_method: "GET" };
+    const substituted = await substitutor.substitute(template, config);
+    expect(substituted.url).toBe("{url}");
+    // ...and then the protocol's expansion applies the raw opt-in.
+    const args: Record<string, any> = { url: "https://caller.example/health" };
+    expect(buildUrlWithPathParams(substituted.url, args)).toBe("https://caller.example/health");
+  });
+
+  test("`${url}` is consumed by the variable layer, not the protocol", async () => {
+    const substitutor = new DefaultVariableSubstitutor();
+    const template = { url: "${url}", http_method: "GET" };
+    const substituted = await substitutor.substitute(template, config);
+    expect(substituted.url).toBe("https://from-config-vars.example");
   });
 });
